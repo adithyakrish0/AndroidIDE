@@ -1,6 +1,7 @@
 package com.example.foldermind
 
 import android.net.Uri
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -34,7 +35,7 @@ import androidx.compose.ui.Alignment
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun DashboardScreen(boundFolderUri: Uri, onSettingsClick: () -> Unit, onChatClick: () -> Unit) {
+fun DashboardScreen(boundFolderUri: Uri, onSettingsClick: () -> Unit, onChatClick: () -> Unit, onFileClick: (Uri) -> Unit) {
     val context = LocalContext.current
     var files by remember { mutableStateOf<List<DocumentFile>>(emptyList()) }
 
@@ -81,7 +82,7 @@ fun DashboardScreen(boundFolderUri: Uri, onSettingsClick: () -> Unit, onChatClic
             } else {
                 LazyColumn {
                     items(files) { file ->
-                        FileListItem(file = file)
+                        FileListItem(file = file, onFileClick = onFileClick)
                         Divider()
                     }
                 }
@@ -91,10 +92,15 @@ fun DashboardScreen(boundFolderUri: Uri, onSettingsClick: () -> Unit, onChatClic
 }
 
 @Composable
-fun FileListItem(file: DocumentFile) {
+fun FileListItem(file: DocumentFile, onFileClick: (Uri) -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClick = {
+                if (!file.isDirectory) {
+                    onFileClick(file.uri)
+                }
+            })
             .padding(vertical = 12.dp)
     ) {
         Text(
