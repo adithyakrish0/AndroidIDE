@@ -3,6 +3,8 @@ package com.example.foldermind
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -21,19 +23,27 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.ai.client.generativeai.type.Content
 import com.google.ai.client.generativeai.type.TextPart
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
 
 class ChatViewModel(
     private val boundFolderUri: Uri,
     private val settingsManager: SettingsManager,
     private val chatRepository: ChatRepository,
-    private val folderAgent: FolderAgent?
+    private val createFolderAgent: ((suspend (ToolConfirmationRequest) -> Boolean) -> FolderAgent?)
 ) : ViewModel() {
+
+    private val folderAgent = createFolderAgent { request ->
+        handleConfirmation(request)
+    }
 
     var messages by mutableStateOf<List<Content>>(emptyList())
         private set
 
     var isLoading by mutableStateOf(false)
+        private set
+
+    var pendingConfirmation by mutableStateOf<Pair<ToolConfirmationRequest, CompletableDeferred<Boolean>>?>(null)
         private set
 
     init {
@@ -45,6 +55,17 @@ class ChatViewModel(
             val history = chatRepository.loadHistory(boundFolderUri)
             messages = history
         }
+    }
+
+    private suspend fun handleConfirmation(request: ToolConfirmationRequest): Boolean {
+        val deferred = CompletableDeferred<Boolean>()
+        pendingConfirmation = Pair(request, deferred)
+        return deferred.await()
+    }
+
+    fun resolveConfirmation(approved: Boolean) {
+        pendingConfirmation?.second?.complete(approved)
+        pendingConfirmation = null
     }
 
     fun sendMessage(text: String) {
@@ -76,12 +97,12 @@ class ChatViewModelFactory(
     private val boundFolderUri: Uri,
     private val settingsManager: SettingsManager,
     private val chatRepository: ChatRepository,
-    private val folderAgent: FolderAgent?
+    private val createFolderAgent: ((suspend (ToolConfirmationRequest) -> Boolean) -> FolderAgent?)
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ChatViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return ChatViewModel(boundFolderUri, settingsManager, chatRepository, folderAgent) as T
+            return ChatViewModel(boundFolderUri, settingsManager, chatRepository, createFolderAgent) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
@@ -100,11 +121,14 @@ fun ChatScreen(boundFolderUri: Uri, onBack: () -> Unit) {
         return
     }
 
-    val folderAgent = remember { FolderAgent(context, boundFolderUri, apiKey, groqKey) }
+    val createFolderAgent: (suspend (ToolConfirmationRequest) -> Boolean) -> FolderAgent? = { confirmHandler ->
+        FolderAgent(context, boundFolderUri, apiKey, groqKey, confirmHandler)
+    }
+
     val chatRepository = remember { ChatRepository(context) }
 
     val viewModel: ChatViewModel = viewModel(
-        factory = ChatViewModelFactory(boundFolderUri, settingsManager, chatRepository, folderAgent)
+        factory = ChatViewModelFactory(boundFolderUri, settingsManager, chatRepository, createFolderAgent)
     )
 
     Scaffold(
@@ -130,6 +154,13 @@ fun ChatScreen(boundFolderUri: Uri, onBack: () -> Unit) {
             ChatInput(
                 isLoading = viewModel.isLoading,
                 onSend = { viewModel.sendMessage(it) }
+            )
+        }
+
+        viewModel.pendingConfirmation?.let { (request, _) ->
+            ConfirmationDialog(
+                request = request,
+                onResult = { approved -> viewModel.resolveConfirmation(approved) }
             )
         }
     }
@@ -229,6 +260,82 @@ fun ChatInput(isLoading: Boolean, onSend: (String) -> Unit) {
             enabled = !isLoading && text.isNotBlank()
         ) {
             Icon(Icons.Filled.Send, contentDescription = "Send")
+        }
+    }
+}
+
+@Composable
+fun ConfirmationDialog(
+    request: ToolConfirmationRequest,
+    onResult: (Boolean) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = { onResult(false) },
+        title = { Text("Confirm Action") },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text("The agent wants to execute:")
+                Text(text = request.toolName, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (request.toolName == "write_file" && request.originalContent != null) {
+                    val newContent = request.args["content"] ?: ""
+                    Text("Diff (Before vs After):", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                    DiffView(oldText = request.originalContent, newText = newContent)
+                } else {
+                    request.args.forEach { (key, value) ->
+                        Text(text = "${key}: ${value}")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onResult(true) }) {
+                Text("Approve")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = { onResult(false) }) {
+                Text("Reject")
+            }
+        }
+    )
+}
+
+@Composable
+fun DiffView(oldText: String, newText: String) {
+    val oldLines = oldText.lines()
+    val newLines = newText.lines()
+
+    // Simple line-by-line diff for MVP
+    Column {
+        val maxLines = maxOf(oldLines.size, newLines.size)
+        for (i in 0 until maxLines) {
+            val oldLine = oldLines.getOrNull(i)
+            val newLine = newLines.getOrNull(i)
+
+            if (oldLine != newLine) {
+                if (oldLine != null) {
+                    Text(
+                        text = "- $oldLine",
+                        color = androidx.compose.ui.graphics.Color.Red,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                if (newLine != null) {
+                    Text(
+                        text = "+ $newLine",
+                        color = androidx.compose.ui.graphics.Color(0xFF00AA00), // Dark Green
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            } else if (oldLine != null) {
+                Text(
+                    text = "  $oldLine",
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
         }
     }
 }
