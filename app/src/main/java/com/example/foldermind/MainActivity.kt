@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,6 +45,8 @@ class MainActivity : ComponentActivity() {
         boundFolderUri = loadBoundFolderUri()
 
         setContent {
+            var showSettings by remember { mutableStateOf(false) }
+
             MaterialTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -54,8 +57,16 @@ class MainActivity : ComponentActivity() {
                         OnboardingScreen(onPickFolder = {
                             folderPickerLauncher.launch(null)
                         })
+                    } else if (showSettings) {
+                        SettingsScreen(
+                            onRebindFolder = { folderPickerLauncher.launch(null) },
+                            onBack = { showSettings = false }
+                        )
                     } else {
-                        DashboardScreen(boundFolderUri = currentUri)
+                        DashboardScreen(
+                            boundFolderUri = currentUri,
+                            onSettingsClick = { showSettings = true }
+                        )
                     }
                 }
             }
