@@ -93,13 +93,14 @@ fun ChatScreen(boundFolderUri: Uri, onBack: () -> Unit) {
     val context = LocalContext.current
     val settingsManager = remember { SettingsManager(context) }
     val apiKey = settingsManager.getGeminiKey()
+    val groqKey = settingsManager.getGroqKey()
 
     if (apiKey.isNullOrBlank()) {
         MissingApiKeyScreen(onBack)
         return
     }
 
-    val folderAgent = remember { FolderAgent(context, boundFolderUri, apiKey) }
+    val folderAgent = remember { FolderAgent(context, boundFolderUri, apiKey, groqKey) }
     val chatRepository = remember { ChatRepository(context) }
 
     val viewModel: ChatViewModel = viewModel(
