@@ -26,11 +26,18 @@ import org.json.JSONObject
 import java.net.UnknownHostException
 import java.net.ConnectException
 
+data class ToolConfirmationRequest(
+    val toolName: String,
+    val args: Map<String, String>,
+    val originalContent: String? = null
+)
+
 class FolderAgent(
     private val context: Context,
     private val boundFolderUri: Uri,
     geminiApiKey: String,
-    groqApiKey: String?
+    groqApiKey: String?,
+    private val confirmHandler: (suspend (ToolConfirmationRequest) -> Boolean)? = null
 ) {
     private val listDirDeclaration = defineFunction(
         name = "list_dir",
@@ -209,7 +216,48 @@ class FolderAgent(
             currentHistory.add(callContent)
 
             val args = firstCall.args
-            val result = when (firstCall.name) {
+
+            val isAutonomous = SettingsManager(context).isAutonomousMode()
+            var isApproved = true
+            if (!isAutonomous && confirmHandler != null) {
+                var originalContent: String? = null
+                if (firstCall.name == "write_file") {
+                    val path = args["path"]
+                    if (path != null) {
+                        withContext(Dispatchers.IO) {
+                            var currentFolder = DocumentFile.fromTreeUri(context, boundFolderUri)
+                            var targetFile: DocumentFile? = null
+                            if (currentFolder != null) {
+                                val parts = path.split("/")
+                                for (i in 0 until parts.size - 1) {
+                                    val part = parts[i]
+                                    if (part.isNotEmpty()) {
+                                        currentFolder = currentFolder?.findFile(part)
+                                    }
+                                }
+                                targetFile = currentFolder?.findFile(parts.last())
+
+                                if (targetFile != null && !targetFile.isDirectory) {
+                                    try {
+                                        context.contentResolver.openInputStream(targetFile.uri)?.use { inputStream ->
+                                            originalContent = inputStream.bufferedReader().use { it.readText() }
+                                        }
+                                    } catch (e: Exception) {
+                                        // Ignore error fetching original content
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                val request = ToolConfirmationRequest(firstCall.name, args, originalContent)
+                isApproved = confirmHandler.invoke(request)
+            }
+
+            val result = if (!isApproved) {
+                JSONObject().put("error", "User rejected tool execution").put("success", false)
+            } else when (firstCall.name) {
                 "list_dir" -> {
                     val path = args["path"]
                     executeListDir(path)
