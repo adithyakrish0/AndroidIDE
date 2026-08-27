@@ -59,6 +59,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.documentfile:documentfile:1.0.1")
+    implementation("androidx.security:security-crypto-ktx:1.1.0-alpha06")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

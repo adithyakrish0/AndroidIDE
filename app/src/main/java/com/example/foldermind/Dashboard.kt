@@ -22,8 +22,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.documentfile.provider.DocumentFile
 
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.Button
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.Alignment
+
 @Composable
-fun DashboardScreen(boundFolderUri: Uri) {
+fun DashboardScreen(boundFolderUri: Uri, onSettingsClick: () -> Unit) {
     val context = LocalContext.current
     var files by remember { mutableStateOf<List<DocumentFile>>(emptyList()) }
 
@@ -39,12 +44,20 @@ fun DashboardScreen(boundFolderUri: Uri) {
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        Text(
-            text = "Dashboard",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Dashboard",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Button(onClick = onSettingsClick) {
+                Text("Settings")
+            }
+        }
 
         if (files.isEmpty()) {
             Text(
