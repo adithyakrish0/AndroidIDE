@@ -13,6 +13,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun SettingsScreen(
     onRebindFolder: () -> Unit,
+    onViewLogs: () -> Unit,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -110,6 +111,21 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Rebind Folder")
+            }
+
+            Divider(modifier = Modifier.padding(vertical = 8.dp))
+
+            Text(
+                text = "Debugging",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+
+            Button(
+                onClick = onViewLogs,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("View Logs")
             }
         }
     }

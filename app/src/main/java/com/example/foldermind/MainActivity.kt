@@ -67,11 +67,15 @@ class MainActivity : ComponentActivity() {
                         when (currentScreen) {
                             "settings" -> SettingsScreen(
                                 onRebindFolder = { folderPickerLauncher.launch(null) },
+                                onViewLogs = { currentScreen = "logs" },
                                 onBack = { currentScreen = "dashboard" }
                             )
                             "chat" -> ChatScreen(
                                 boundFolderUri = currentUri,
                                 onBack = { currentScreen = "dashboard" }
+                            )
+                            "logs" -> LogsScreen(
+                                onBack = { currentScreen = "settings" }
                             )
                             else -> DashboardScreen(
                                 boundFolderUri = currentUri,
