@@ -24,11 +24,17 @@ import androidx.documentfile.provider.DocumentFile
 
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.Button
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Scaffold
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.Alignment
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun DashboardScreen(boundFolderUri: Uri, onSettingsClick: () -> Unit) {
+fun DashboardScreen(boundFolderUri: Uri, onSettingsClick: () -> Unit, onChatClick: () -> Unit) {
     val context = LocalContext.current
     var files by remember { mutableStateOf<List<DocumentFile>>(emptyList()) }
 
@@ -39,36 +45,45 @@ fun DashboardScreen(boundFolderUri: Uri, onSettingsClick: () -> Unit) {
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Dashboard",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold
-            )
-            Button(onClick = onSettingsClick) {
-                Text("Settings")
+    Scaffold(
+        floatingActionButton = {
+            FloatingActionButton(onClick = onChatClick) {
+                Icon(Icons.Filled.Send, contentDescription = "Chat")
             }
         }
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Dashboard",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Button(onClick = onSettingsClick) {
+                    Text("Settings")
+                }
+            }
 
-        if (files.isEmpty()) {
-            Text(
-                text = "No files found in the bound folder.",
-                style = MaterialTheme.typography.bodyLarge
-            )
-        } else {
-            LazyColumn {
-                items(files) { file ->
-                    FileListItem(file = file)
-                    Divider()
+            if (files.isEmpty()) {
+                Text(
+                    text = "No files found in the bound folder.",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            } else {
+                LazyColumn {
+                    items(files) { file ->
+                        FileListItem(file = file)
+                        Divider()
+                    }
                 }
             }
         }

@@ -45,7 +45,7 @@ class MainActivity : ComponentActivity() {
         boundFolderUri = loadBoundFolderUri()
 
         setContent {
-            var showSettings by remember { mutableStateOf(false) }
+            var currentScreen by remember { mutableStateOf("dashboard") }
 
             MaterialTheme {
                 Surface(
@@ -57,16 +57,22 @@ class MainActivity : ComponentActivity() {
                         OnboardingScreen(onPickFolder = {
                             folderPickerLauncher.launch(null)
                         })
-                    } else if (showSettings) {
-                        SettingsScreen(
-                            onRebindFolder = { folderPickerLauncher.launch(null) },
-                            onBack = { showSettings = false }
-                        )
                     } else {
-                        DashboardScreen(
-                            boundFolderUri = currentUri,
-                            onSettingsClick = { showSettings = true }
-                        )
+                        when (currentScreen) {
+                            "settings" -> SettingsScreen(
+                                onRebindFolder = { folderPickerLauncher.launch(null) },
+                                onBack = { currentScreen = "dashboard" }
+                            )
+                            "chat" -> ChatScreen(
+                                boundFolderUri = currentUri,
+                                onBack = { currentScreen = "dashboard" }
+                            )
+                            else -> DashboardScreen(
+                                boundFolderUri = currentUri,
+                                onSettingsClick = { currentScreen = "settings" },
+                                onChatClick = { currentScreen = "chat" }
+                            )
+                        }
                     }
                 }
             }
