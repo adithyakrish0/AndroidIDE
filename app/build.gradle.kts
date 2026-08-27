@@ -62,9 +62,13 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.security:security-crypto-ktx:1.1.0-alpha06")
-    implementation("com.google.ai.client.generativeai:generativeai:0.7.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
     implementation("com.google.code.gson:gson:2.10.1")
+
+    // Markdown dependencies
+    implementation("io.noties.markwon:core:4.6.2")
+    implementation("io.noties.markwon:ext-tables:4.6.2")
+    implementation("io.noties.markwon:ext-tasklist:4.6.2")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

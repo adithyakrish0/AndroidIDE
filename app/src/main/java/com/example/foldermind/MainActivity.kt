@@ -46,6 +46,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             var currentScreen by remember { mutableStateOf("dashboard") }
+            var previewUri by remember { mutableStateOf<Uri?>(null) }
 
             MaterialTheme {
                 Surface(
@@ -57,6 +58,11 @@ class MainActivity : ComponentActivity() {
                         OnboardingScreen(onPickFolder = {
                             folderPickerLauncher.launch(null)
                         })
+                    } else if (previewUri != null) {
+                        FilePreviewScreen(
+                            fileUri = previewUri!!,
+                            onBack = { previewUri = null }
+                        )
                     } else {
                         when (currentScreen) {
                             "settings" -> SettingsScreen(
@@ -70,7 +76,8 @@ class MainActivity : ComponentActivity() {
                             else -> DashboardScreen(
                                 boundFolderUri = currentUri,
                                 onSettingsClick = { currentScreen = "settings" },
-                                onChatClick = { currentScreen = "chat" }
+                                onChatClick = { currentScreen = "chat" },
+                                onFileClick = { uri -> previewUri = uri }
                             )
                         }
                     }
