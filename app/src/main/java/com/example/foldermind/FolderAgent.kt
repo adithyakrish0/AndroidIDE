@@ -431,6 +431,48 @@ class FolderAgent(
         }
     }
 
+    private suspend fun backupFile(path: String, folder: DocumentFile) {
+        try {
+            val originalFile = folder.findFile(path) ?: return
+
+            var historyFolder = folder.findFile(".history")
+            if (historyFolder == null) {
+                historyFolder = folder.createDirectory(".history")
+            }
+            if (historyFolder == null) return
+
+            val content = context.contentResolver.openInputStream(originalFile.uri)?.use { inputStream ->
+                inputStream.bufferedReader().use { it.readText() }
+            } ?: return
+
+            val timestamp = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH-mm-ss", java.util.Locale.US).format(java.util.Date())
+            val backupFileName = "$path.$timestamp.bak"
+
+            val mimeType = "text/plain"
+            val backupFile = historyFolder.createFile(mimeType, backupFileName) ?: return
+
+            context.contentResolver.openOutputStream(backupFile.uri, "w")?.use { outputStream ->
+                outputStream.write(content.toByteArray())
+            }
+
+            // Pruning
+            val allBackups = historyFolder.listFiles().filter {
+                val name = it.name ?: ""
+                name.startsWith("$path.") && name.endsWith(".bak")
+            }.sortedBy { it.name }
+
+            val maxBackups = 10
+            if (allBackups.size > maxBackups) {
+                val backupsToDelete = allBackups.take(allBackups.size - maxBackups)
+                for (b in backupsToDelete) {
+                    b.delete()
+                }
+            }
+        } catch (e: Exception) {
+            // Ignore backup errors so we don't block the main operation
+        }
+    }
+
     private suspend fun executeDeleteFile(path: String): JSONObject {
         return withContext(Dispatchers.IO) {
             try {
@@ -441,6 +483,8 @@ class FolderAgent(
                 if (file == null) {
                     return@withContext JSONObject().put("error", "File not found: $path").put("success", false)
                 }
+
+                backupFile(path, folder)
 
                 if (file.delete()) {
                     JSONObject().put("success", true).put("message", "File deleted successfully")
@@ -485,6 +529,8 @@ class FolderAgent(
                 if (file == null) {
                     val mimeType = if (path.endsWith(".md")) "text/markdown" else "text/plain"
                     file = folder.createFile(mimeType, path)
+                } else {
+                    backupFile(path, folder)
                 }
 
                 if (file == null) {
