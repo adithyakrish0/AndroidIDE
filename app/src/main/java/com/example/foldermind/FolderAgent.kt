@@ -159,6 +159,8 @@ class FolderAgent(
         )
     )
 
+    private val agentLogger = AgentLogger(context)
+
     private val geminiProvider = GeminiProvider(model)
     private val groqProvider = groqApiKey?.takeIf { it.isNotBlank() }?.let { GroqProvider(it) }
 
@@ -170,7 +172,11 @@ class FolderAgent(
     }
 
     suspend fun sendMessage(chatHistory: List<Content>, message: String): String {
+        agentLogger.log("--- Agent Turn Started ---")
+        agentLogger.log("User Message: $message")
+
         if (!isInternetAvailable()) {
+            agentLogger.log("Error: No internet connection.")
             return "No internet connection before attempting a request."
         }
 
@@ -179,24 +185,30 @@ class FolderAgent(
 
         var providerNotice = ""
         var currentProvider: AIProvider = geminiProvider
+        agentLogger.log("Active Provider: Gemini")
 
         var response = try {
             currentProvider.sendMessage(currentHistory)
         } catch (e: Exception) {
+            agentLogger.log("Error from Gemini: ${e.message}")
             val isQuotaError = e.message?.contains("429") == true || e.message?.contains("quota") == true || e is ResponseStoppedException
             if (isQuotaError) {
                 if (groqProvider != null) {
+                    agentLogger.log("Fallback Event: Switched to Groq due to quota limit")
                     currentProvider = groqProvider
                     providerNotice = "\n\n(Switched to backup model due to quota limit)"
                     try {
                         currentProvider.sendMessage(currentHistory)
                     } catch (e2: Exception) {
+                        agentLogger.log("Error from Groq: ${e2.message}")
                         if (e2.message?.contains("429") == true || e2.message?.contains("quota") == true) {
+                            agentLogger.log("Error: Daily limit reached on both providers.")
                             return "Daily limit reached on both providers — try again later"
                         }
                         throw e2
                     }
                 } else {
+                    agentLogger.log("Error: Gemini quota exceeded and no Groq fallback key configured.")
                     return "Gemini quota exceeded and no Groq fallback key configured."
                 }
             } else {
@@ -210,12 +222,13 @@ class FolderAgent(
             val toolCalls = (response as ProviderResponse.ToolCalls).functionCalls
             val firstCall = toolCalls.first()
 
+            val args = firstCall.args
+            agentLogger.log("Tool Call: ${firstCall.name}, args: $args")
+
             val callContent = content("model") {
                 part(FunctionCallPart(firstCall.name, firstCall.args))
             }
             currentHistory.add(callContent)
-
-            val args = firstCall.args
 
             val isAutonomous = SettingsManager(context).isAutonomousMode()
             var isApproved = true
@@ -256,6 +269,7 @@ class FolderAgent(
             }
 
             val result = if (!isApproved) {
+                agentLogger.log("Tool execution rejected by user.")
                 JSONObject().put("error", "User rejected tool execution").put("success", false)
             } else when (firstCall.name) {
                 "list_dir" -> {
@@ -288,6 +302,8 @@ class FolderAgent(
                 else -> JSONObject().put("error", "Unknown function").put("success", false)
             }
 
+            agentLogger.log("Tool Result: $result")
+
             val responseContent = content("function") {
                 part(FunctionResponsePart(firstCall.name, result))
             }
@@ -296,20 +312,25 @@ class FolderAgent(
             response = try {
                 currentProvider.sendMessage(currentHistory)
             } catch (e: Exception) {
+                 agentLogger.log("Error from active provider during tool loop: ${e.message}")
                  val isQuotaError = e.message?.contains("429") == true || e.message?.contains("quota") == true
                  if (isQuotaError) {
                      if (currentProvider == geminiProvider && groqProvider != null) {
+                         agentLogger.log("Fallback Event: Switched to Groq due to quota limit during tool loop")
                          currentProvider = groqProvider
                          providerNotice = "\n\n(Switched to backup model due to quota limit)"
                          try {
                              currentProvider.sendMessage(currentHistory)
                          } catch (e2: Exception) {
+                            agentLogger.log("Error from Groq during tool loop: ${e2.message}")
                             if (e2.message?.contains("429") == true || e2.message?.contains("quota") == true) {
+                                agentLogger.log("Error: Daily limit reached on both providers.")
                                 return "Daily limit reached on both providers — try again later"
                             }
                             throw e2
                          }
                      } else {
+                         agentLogger.log("Error: Daily limit reached on both providers.")
                          return "Daily limit reached on both providers — try again later"
                      }
                  } else {
@@ -319,12 +340,15 @@ class FolderAgent(
         }
 
         if (toolCallCount >= 15) {
+            agentLogger.log("Error: Agent loop cap reached.")
             return "Agent loop cap reached (~15 tool calls). Stopped to prevent runaway execution."
         }
 
         return if (response is ProviderResponse.Text) {
+            agentLogger.log("Final Model Response: ${response.text}")
             response.text + providerNotice
         } else {
+            agentLogger.log("Error: No response from agent.")
             "No response from agent." + providerNotice
         }
     }
