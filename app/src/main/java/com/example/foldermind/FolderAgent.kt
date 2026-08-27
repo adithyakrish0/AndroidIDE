@@ -1,12 +1,15 @@
 package com.example.foldermind
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.BlockThreshold
 import com.google.ai.client.generativeai.type.Content
 import com.google.ai.client.generativeai.type.FunctionCallingConfig
+import com.google.ai.client.generativeai.type.FunctionCallPart
 import com.google.ai.client.generativeai.type.FunctionResponsePart
 import com.google.ai.client.generativeai.type.HarmCategory
 import com.google.ai.client.generativeai.type.SafetySetting
@@ -15,15 +18,19 @@ import com.google.ai.client.generativeai.type.Tool
 import com.google.ai.client.generativeai.type.ToolConfig
 import com.google.ai.client.generativeai.type.content
 import com.google.ai.client.generativeai.type.defineFunction
+import com.google.ai.client.generativeai.type.FunctionType
+import com.google.ai.client.generativeai.type.ResponseStoppedException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import com.google.ai.client.generativeai.type.FunctionType
+import java.net.UnknownHostException
+import java.net.ConnectException
 
 class FolderAgent(
     private val context: Context,
     private val boundFolderUri: Uri,
-    apiKey: String
+    geminiApiKey: String,
+    groqApiKey: String?
 ) {
     private val listDirDeclaration = defineFunction(
         name = "list_dir",
@@ -114,7 +121,7 @@ class FolderAgent(
 
     private val model = GenerativeModel(
         modelName = "gemini-1.5-flash",
-        apiKey = apiKey,
+        apiKey = geminiApiKey,
         systemInstruction = content {
             text("You are an AI assistant that manages files in a specific folder on the user's device. " +
                     "Your primary way of helping the user is by creating and modifying markdown files in this folder. " +
@@ -145,60 +152,133 @@ class FolderAgent(
         )
     )
 
-    suspend fun sendMessage(chatHistory: List<Content>, message: String): String {
-        val chat = model.startChat(chatHistory)
+    private val geminiProvider = GeminiProvider(model)
+    private val groqProvider = groqApiKey?.takeIf { it.isNotBlank() }?.let { GroqProvider(it) }
 
-        var response = chat.sendMessage(message)
+    private fun isInternetAvailable(): Boolean {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    suspend fun sendMessage(chatHistory: List<Content>, message: String): String {
+        if (!isInternetAvailable()) {
+            return "No internet connection before attempting a request."
+        }
+
+        val currentHistory = chatHistory.toMutableList()
+        currentHistory.add(content("user") { text(message) })
+
+        var providerNotice = ""
+        var currentProvider: AIProvider = geminiProvider
+
+        var response = try {
+            currentProvider.sendMessage(currentHistory)
+        } catch (e: Exception) {
+            val isQuotaError = e.message?.contains("429") == true || e.message?.contains("quota") == true || e is ResponseStoppedException
+            if (isQuotaError) {
+                if (groqProvider != null) {
+                    currentProvider = groqProvider
+                    providerNotice = "\n\n(Switched to backup model due to quota limit)"
+                    try {
+                        currentProvider.sendMessage(currentHistory)
+                    } catch (e2: Exception) {
+                        if (e2.message?.contains("429") == true || e2.message?.contains("quota") == true) {
+                            return "Daily limit reached on both providers — try again later"
+                        }
+                        throw e2
+                    }
+                } else {
+                    return "Gemini quota exceeded and no Groq fallback key configured."
+                }
+            } else {
+                throw e
+            }
+        }
 
         var toolCallCount = 0
-        while (response.functionCalls.isNotEmpty() && toolCallCount < 15) {
+        while (response is ProviderResponse.ToolCalls && toolCallCount < 15) {
             toolCallCount++
-            val functionCall = response.functionCalls.first()
+            val toolCalls = (response as ProviderResponse.ToolCalls).functionCalls
+            val firstCall = toolCalls.first()
 
-            val args = functionCall.args
-            val result = when (functionCall.name) {
+            val callContent = content("model") {
+                part(FunctionCallPart(firstCall.name, firstCall.args))
+            }
+            currentHistory.add(callContent)
+
+            val args = firstCall.args
+            val result = when (firstCall.name) {
                 "list_dir" -> {
-                    val path = args["path"] as? String
+                    val path = args["path"]
                     executeListDir(path)
                 }
                 "read_file" -> {
-                    val path = args["path"] as? String
+                    val path = args["path"]
                     if (path != null) executeReadFile(path) else JSONObject().put("error", "Missing path").put("success", false)
                 }
                 "create_file" -> {
-                    val path = args["path"] as? String
-                    val contentStr = args["content"] as? String
+                    val path = args["path"]
+                    val contentStr = args["content"]
                     if (path != null && contentStr != null) executeCreateFile(path, contentStr) else JSONObject().put("error", "Missing args").put("success", false)
                 }
                 "write_file" -> {
-                    val path = args["path"] as? String
-                    val contentStr = args["content"] as? String
+                    val path = args["path"]
+                    val contentStr = args["content"]
                     if (path != null && contentStr != null) executeWriteFile(path, contentStr) else JSONObject().put("error", "Missing args").put("success", false)
                 }
                 "delete_file" -> {
-                    val path = args["path"] as? String
+                    val path = args["path"]
                     if (path != null) executeDeleteFile(path) else JSONObject().put("error", "Missing path").put("success", false)
                 }
                 "rename_file" -> {
-                    val oldPath = args["old_path"] as? String
-                    val newPath = args["new_path"] as? String
+                    val oldPath = args["old_path"]
+                    val newPath = args["new_path"]
                     if (oldPath != null && newPath != null) executeRenameFile(oldPath, newPath) else JSONObject().put("error", "Missing args").put("success", false)
                 }
                 else -> JSONObject().put("error", "Unknown function").put("success", false)
             }
 
-            response = chat.sendMessage(
-                content {
-                    part(FunctionResponsePart(functionCall.name, result))
-                }
-            )
+            val responseContent = content("function") {
+                part(FunctionResponsePart(firstCall.name, result))
+            }
+            currentHistory.add(responseContent)
+
+            response = try {
+                currentProvider.sendMessage(currentHistory)
+            } catch (e: Exception) {
+                 val isQuotaError = e.message?.contains("429") == true || e.message?.contains("quota") == true
+                 if (isQuotaError) {
+                     if (currentProvider == geminiProvider && groqProvider != null) {
+                         currentProvider = groqProvider
+                         providerNotice = "\n\n(Switched to backup model due to quota limit)"
+                         try {
+                             currentProvider.sendMessage(currentHistory)
+                         } catch (e2: Exception) {
+                            if (e2.message?.contains("429") == true || e2.message?.contains("quota") == true) {
+                                return "Daily limit reached on both providers — try again later"
+                            }
+                            throw e2
+                         }
+                     } else {
+                         return "Daily limit reached on both providers — try again later"
+                     }
+                 } else {
+                     throw e
+                 }
+            }
         }
 
         if (toolCallCount >= 15) {
             return "Agent loop cap reached (~15 tool calls). Stopped to prevent runaway execution."
         }
 
-        return response.text ?: "No response from agent."
+        return if (response is ProviderResponse.Text) {
+            response.text + providerNotice
+        } else {
+            "No response from agent." + providerNotice
+        }
     }
 
     private suspend fun executeListDir(path: String?): JSONObject {
